@@ -12,3 +12,13 @@ API: **http://localhost:4000** · Документація API (Swagger): **http
 Перевірка: `GET /health`. Для демо-токена клієнт також має слати `X-User-Id` з UUID користувача з Supabase Auth.
 
 Тести: `npm test`
+
+## Продакшн
+
+На сервері в `.env`: ті самі змінні, що й локально, плюс **`FRONTEND_ORIGIN`** — URL фронту (https), **`PORT`** — якщо не 4000.
+
+```bash
+npm ci
+npm run build
+npm run start:prod
+```
