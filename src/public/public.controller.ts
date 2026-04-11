@@ -8,12 +8,12 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { isPublicSelfOrAncestor } from '../lib/itemPublicAccess';
+import { isPublicForAnonymousAccess } from '../lib/itemPublicAccess';
 import { getSupabase } from '../lib/supabase';
 
 const BUCKET = 'files';
 
-/** Same chain as ItemsController.folderPathChainFromItem — call only after isPublicSelfOrAncestor passes. */
+/** Same chain as ItemsController.folderPathChainFromItem — call only after isPublicForAnonymousAccess passes. */
 async function folderPathChainFromItem(
   supabase: ReturnType<typeof getSupabase>,
   item: Record<string, unknown>,
@@ -44,7 +44,7 @@ export class PublicController {
     const supabase = getSupabase();
     const { data: item, error } = await supabase.from('items').select('*').eq('id', id).single();
     if (error || !item) throw new NotFoundException();
-    if (!(await isPublicSelfOrAncestor(supabase, item as Record<string, unknown>))) {
+    if (!isPublicForAnonymousAccess(item as Record<string, unknown>)) {
       throw new NotFoundException();
     }
     const pathFromRoot = await folderPathChainFromItem(supabase, item as Record<string, unknown>);
@@ -64,7 +64,7 @@ export class PublicController {
     const { data: parent, error: pe } = await supabase.from('items').select('*').eq('id', id).single();
     if (pe || !parent) throw new NotFoundException();
     if ((parent as { item_type: string }).item_type !== 'folder') throw new NotFoundException();
-    if (!(await isPublicSelfOrAncestor(supabase, parent as Record<string, unknown>))) {
+    if (!isPublicForAnonymousAccess(parent as Record<string, unknown>)) {
       throw new NotFoundException();
     }
     const ownerId = (parent as { owner_id: string }).owner_id;
@@ -77,7 +77,7 @@ export class PublicController {
     if (error) throw new BadRequestException(error.message);
     const items: Record<string, unknown>[] = [];
     for (const row of rawChildren ?? []) {
-      if (await isPublicSelfOrAncestor(supabase, row as Record<string, unknown>)) {
+      if (isPublicForAnonymousAccess(row as Record<string, unknown>)) {
         items.push({
           ...row,
           my_role: 'read',
@@ -95,7 +95,7 @@ export class PublicController {
     const supabase = getSupabase();
     const { data: item, error } = await supabase.from('items').select('*').eq('id', id).single();
     if (error || !item) throw new NotFoundException();
-    if (!(await isPublicSelfOrAncestor(supabase, item as Record<string, unknown>))) {
+    if (!isPublicForAnonymousAccess(item as Record<string, unknown>)) {
       throw new NotFoundException();
     }
     if (item.item_type !== 'file' || !item.storage_path) throw new NotFoundException();

@@ -1,23 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-
 /**
- * True if this item is public OR lies under a public folder (any ancestor has is_public).
- * Same rule drives anonymous `/public/items/*` and authenticated `canReadItem` for non-owners.
+ * Anonymous / unauthenticated access: only this row's `is_public` matters.
+ * A private file inside a public folder stays hidden until marked public.
+ * (Email-based shares use a separate path in ItemsController.)
  */
-export async function isPublicSelfOrAncestor(
-  supabase: SupabaseClient,
-  item: Record<string, unknown>,
-): Promise<boolean> {
-  let cur: Record<string, unknown> | null = item;
-  let depth = 0;
-  const maxDepth = 64;
-  while (cur && depth++ < maxDepth) {
-    if (cur.is_public === true) return true;
-    const pid = cur.parent_id as string | null;
-    if (!pid) return false;
-    const { data, error } = await supabase.from('items').select('*').eq('id', pid).single();
-    if (error || !data) return false;
-    cur = data as Record<string, unknown>;
-  }
-  return false;
+export function isPublicForAnonymousAccess(item: Record<string, unknown>): boolean {
+  return item.is_public === true;
 }

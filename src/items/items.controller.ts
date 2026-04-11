@@ -22,7 +22,6 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { isPublicSelfOrAncestor } from '../lib/itemPublicAccess';
 import { getSupabase } from '../lib/supabase';
 import { extensionForUploadedFile, normalizeUploadedFileMime } from '../lib/mime';
 import {
@@ -48,7 +47,7 @@ export class ItemsController {
   @ApiOperation({
     summary: 'List items in a folder (root if parentId omitted)',
     description:
-      'Root lists only your own items. With parentId, lists children if you own the folder, it is public, or you have share access (same rules as deep links).',
+      'Root lists only your own items. With parentId, lists children if you own the folder, the folder itself is public, or you have share access. Each child must pass the same read rules (public means that row’s is_public, not inherited from a parent).',
   })
   async list(@Req() req: AuthedRequest, @Query('parentId') parentId?: string) {
     const supabase = getSupabase();
@@ -181,7 +180,7 @@ export class ItemsController {
         my_role: 'owner',
         can_manage: true,
       };
-    } else if (await isPublicSelfOrAncestor(supabase, item as Record<string, unknown>)) {
+    } else if (item.is_public === true) {
       const withEmails = await this.attachOwnerEmailsFromAuth(supabase, [item as Record<string, unknown>]);
       enriched = {
         ...(withEmails[0] ?? item),
@@ -366,18 +365,42 @@ export class ItemsController {
     const { data, error } = await supabase.from('items').update(patch).eq('id', id).select().single();
     if (error) throw new BadRequestException(error.message);
     if (!data) throw new NotFoundException();
-    if (body.isPublic === true && data.item_type === 'folder') {
-      await this.propagatePublicToDescendants(supabase, req.userId, id);
+    if (body.isPublic !== undefined && data.item_type === 'folder') {
+      await this.propagatePublicToDescendants(supabase, data.owner_id as string, id, body.isPublic);
     }
     return { item: data };
   }
 
-  /** When a folder is set public, mark every nested file/folder (same owner) as public in DB. */
+  /**
+   * All nested items under `folderId` (any depth, same owner) get the same visibility as the folder toggle.
+   */
   private async propagatePublicToDescendants(
     supabase: ReturnType<typeof getSupabase>,
     ownerId: string,
     folderId: string,
+    isPublic: boolean,
   ): Promise<void> {
+    const descendantIds = await this.collectDescendantIdsUnderFolder(supabase, ownerId, folderId);
+    if (descendantIds.length === 0) return;
+    const now = new Date().toISOString();
+    const chunkSize = 100;
+    for (let i = 0; i < descendantIds.length; i += chunkSize) {
+      const chunk = descendantIds.slice(i, i + chunkSize);
+      const { error } = await supabase
+        .from('items')
+        .update({ is_public: isPublic, updated_at: now })
+        .in('id', chunk)
+        .eq('owner_id', ownerId);
+      if (error) throw new BadRequestException(error.message);
+    }
+  }
+
+  /** BFS/stack over the whole subtree: direct children and all deeper levels. */
+  private async collectDescendantIdsUnderFolder(
+    supabase: ReturnType<typeof getSupabase>,
+    ownerId: string,
+    folderId: string,
+  ): Promise<string[]> {
     const { data: all } = await supabase.from('items').select('id, parent_id').eq('owner_id', ownerId);
     const byParent = new Map<string | null, string[]>();
     for (const r of all ?? []) {
@@ -392,18 +415,7 @@ export class ItemsController {
       descendantIds.push(nid);
       for (const c of byParent.get(nid) ?? []) stack.push(c);
     }
-    if (descendantIds.length === 0) return;
-    const now = new Date().toISOString();
-    const chunkSize = 100;
-    for (let i = 0; i < descendantIds.length; i += chunkSize) {
-      const chunk = descendantIds.slice(i, i + chunkSize);
-      const { error } = await supabase
-        .from('items')
-        .update({ is_public: true, updated_at: now })
-        .in('id', chunk)
-        .eq('owner_id', ownerId);
-      if (error) throw new BadRequestException(error.message);
-    }
+    return descendantIds;
   }
 
   @Post(':id/clone')
@@ -625,7 +637,7 @@ export class ItemsController {
     return email.trim().toLowerCase();
   }
 
-  /** Owner, public (self or under a public folder), or email-based share on this item or an ancestor. */
+  /** Owner, item marked public (its own flag only), or email-based share on this item or an ancestor. */
   private async canReadItem(
     supabase: ReturnType<typeof getSupabase>,
     req: AuthedRequest,
@@ -633,7 +645,7 @@ export class ItemsController {
   ): Promise<boolean> {
     const uid = req.userId;
     if (item.owner_id === uid) return true;
-    if (await isPublicSelfOrAncestor(supabase, item)) return true;
+    if (item.is_public === true) return true;
     const em = req.userEmail?.trim();
     if (!em) return false;
     return this.hasSharedAccess(supabase, ItemsController.normalizeEmail(em), item.id as string);
