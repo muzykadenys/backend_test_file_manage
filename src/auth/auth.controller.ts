@@ -1,6 +1,6 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { getSupabase } from '../lib/supabase';
+import { getSupabaseAuthFlow } from '../lib/supabase';
 import { LoginDto, RegisterDto } from './dto';
 
 @ApiTags('auth')
@@ -9,7 +9,7 @@ export class AuthController {
   @Post('register')
   @ApiOperation({ summary: 'Register a new user (Supabase Auth admin)' })
   async register(@Body() body: RegisterDto) {
-    const supabase = getSupabase();
+    const supabase = getSupabaseAuthFlow();
     const { data, error } = await supabase.auth.admin.createUser({
       email: body.email,
       password: body.password,
@@ -27,7 +27,7 @@ export class AuthController {
   @Post('login')
   @ApiOperation({ summary: 'Login; returns Supabase access token for API calls' })
   async login(@Body() body: LoginDto) {
-    const supabase = getSupabase();
+    const supabase = getSupabaseAuthFlow();
     const { data, error } = await supabase.auth.signInWithPassword({
       email: body.email,
       password: body.password,

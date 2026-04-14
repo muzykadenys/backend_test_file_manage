@@ -355,18 +355,19 @@ export class ItemsController {
   @ApiOperation({ summary: 'Rename or toggle visibility (visibility: owner or share admin only)' })
   async update(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: UpdateItemDto) {
     const supabase = getSupabase();
-    const wantsName = body.name !== undefined;
-    const wantsPublic = body.isPublic !== undefined;
+    /** @IsOptional skips @IsBoolean for null, so reject null/invalid without writing NULL to NOT NULL column */
+    const wantsName = typeof body.name === 'string';
+    const wantsPublic = typeof body.isPublic === 'boolean';
     if (!wantsName && !wantsPublic) throw new BadRequestException('No fields to update');
     await this.assertCanPatchItem(supabase, req, id, wantsName, wantsPublic);
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (body.name !== undefined) patch.name = normalizeItemName(body.name);
-    if (body.isPublic !== undefined) patch.is_public = body.isPublic;
+    if (wantsName) patch.name = normalizeItemName(body.name as string);
+    if (wantsPublic) patch.is_public = body.isPublic as boolean;
     const { data, error } = await supabase.from('items').update(patch).eq('id', id).select().single();
     if (error) throw new BadRequestException(error.message);
     if (!data) throw new NotFoundException();
-    if (body.isPublic !== undefined && data.item_type === 'folder') {
-      await this.propagatePublicToDescendants(supabase, data.owner_id as string, id, body.isPublic);
+    if (wantsPublic && data.item_type === 'folder') {
+      await this.propagatePublicToDescendants(supabase, data.owner_id as string, id, body.isPublic as boolean);
     }
     return { item: data };
   }

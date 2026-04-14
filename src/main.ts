@@ -4,10 +4,23 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { MulterExceptionFilter } from './multer-exception.filter';
 
+function corsOrigin(): boolean | string | string[] {
+  const raw = process.env.FRONTEND_ORIGIN?.trim();
+  if (!raw) return true;
+  if (raw === '*') return true;
+  if (raw.includes(',')) {
+    return raw
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean);
+  }
+  return raw;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalFilters(new MulterExceptionFilter());
-  app.enableCors({ origin: process.env.FRONTEND_ORIGIN ?? true, credentials: true });
+  app.enableCors({ origin: corsOrigin(), credentials: true });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
